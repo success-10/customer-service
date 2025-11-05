@@ -1,3 +1,205 @@
 from django.shortcuts import render
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+from django.db import transaction
+from django.utils import timezone
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+from .models import Message, Agent, CannedResponse
+from .serializers import MessageSerializer, CannedResponseSerializer
+from .utils import calculate_priority
 
 # Create your views here.
+
+
+channel_layer = get_channel_layer()
+
+@api_view(['GET'])
+def list_messages(request):
+    """
+    GET /api/messages/  -> list messages, supports ?status=unassigned or sorting by priority
+    """
+    status_q = request.GET.get('status')
+    qs = Message.objects.all()
+    if status_q:
+        qs = qs.filter(status=status_q)
+    qs = qs.order_by('-priority', 'created_at')[:200]  # limit to first 200 for safety
+    serializer = MessageSerializer(qs, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+def claim_message(request, message_id):
+    """
+    POST /api/messages/<id>/claim
+    body: {"agent_id": 1}
+    Uses an atomic SQL UPDATE to claim only if still unassigned.
+    """
+    agent_id = request.data.get('agent_id')
+    if not agent_id:
+        return Response({"detail": "agent_id required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        agent = Agent.objects.get(id=agent_id)
+    except Agent.DoesNotExist:
+        return Response({"detail": "Invalid agent_id"}, status=400)
+    
+    now = timezone.now()
+
+    with transaction.atomic():
+        updated_rows = Message.objects.filter(
+            id=message_id,
+            status=Message.STATUS_UNASSIGNED
+        ).update(
+            assigned_to=agent,
+            status=Message.STATUS_IN_PROGRESS,
+            claimed_at=now
+        )
+
+        if updated_rows == 1:
+            # Successful claim; broadcast update
+            async_to_sync(channel_layer.group_send)(
+                "agents",
+                {
+                    "type": "message_update",
+                    "message_id": int(message_id),
+                    "status": Message.STATUS_IN_PROGRESS,
+                    "assigned_to": int(agent_id)
+                }
+            )
+            return Response({"status": "claimed",
+                            "message_id": int(message_id),
+                            "claimed_by": int(agent_id)
+                        }, status=status.HTTP_200_OK)
+        else:
+            # Already claimed: fetch current assignee for message
+            try:
+                msg = Message.objects.get(id=message_id)
+                assigned = msg.assigned_to.name if msg.assigned_to else None
+                return Response({"status": "already_claimed", "by": assigned}, status=status.HTTP_409_CONFLICT)
+            except Message.DoesNotExist:
+                return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def reply_message(request, message_id):
+    """
+    POST /api/messages/<id>/reply
+    body: {"agent_id":1, "text": "reply here" }
+    Stores reply, marks message closed, broadcasts update.
+    """
+    agent_id = request.data.get('agent_id')
+    text = request.data.get('text')
+    if not agent_id or text is None:
+        return Response({"detail": "agent_id and text required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        msg = Message.objects.get(id=message_id)
+    except Message.DoesNotExist:
+        return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    
+    if msg.assigned_to and msg.assigned_to.id != int(agent_id):
+        return Response({"detail": "message assigned to another agent"}, status=status.HTTP_403_FORBIDDEN)
+
+    msg.response = text
+    msg.responded_at = timezone.now()
+    msg.status = Message.STATUS_CLOSED
+    msg.save()
+
+    # Broadcast closed status to all agents
+    async_to_sync(channel_layer.group_send)(
+        "agents",
+        {
+            "type": "message_update",
+            "message_id": msg.id,
+            "status": Message.STATUS_CLOSED,
+            "assigned_to": msg.assigned_to.id if msg.assigned_to else None
+        }
+    )
+
+    return Response({"status": "replied"}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def list_canned(request):
+    qs = CannedResponse.objects.all()
+    serializer = CannedResponseSerializer(qs, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+def use_canned_reply(request, message_id):
+    """
+    POST /api/messages/<id>/use_canned
+    body: {"agent_id":1, "canned_id": 3}
+    Applies a canned response and marks the message as closed.
+    """
+    agent_id = request.data.get('agent_id')
+    canned_id = request.data.get('canned_id')
+
+    # Validate inputs
+    if not agent_id or not canned_id:
+        return Response(
+            {"detail": "agent_id and canned_id required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # onfirm existence of agent, canned reply, and message
+    try:
+        agent = Agent.objects.get(id=agent_id)
+        canned = CannedResponse.objects.get(id=canned_id)
+        msg = Message.objects.get(id=message_id)
+    except (Agent.DoesNotExist, CannedResponse.DoesNotExist, Message.DoesNotExist):
+        return Response(
+            {"detail": "agent, canned reply, or message not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    now = timezone.now()
+
+    # Safely assign if message is unassigned
+    with transaction.atomic():
+        if msg.status == Message.STATUS_UNASSIGNED:
+            updated_rows = Message.objects.filter(
+                id=message_id,
+                status=Message.STATUS_UNASSIGNED
+            ).update(
+                assigned_to=agent,
+                status=Message.STATUS_IN_PROGRESS,
+                claimed_at=now
+            )
+
+            # Re-fetch message if assigned successfully
+            if updated_rows:
+                msg.refresh_from_db()
+
+        # Apply canned reply
+        msg.response = canned.body
+        msg.responded_at = now
+        msg.status = Message.STATUS_CLOSED
+        msg.assigned_to = agent
+        msg.save()
+
+    # Broadcast message closure to all agents
+    async_to_sync(channel_layer.group_send)(
+        "agents",
+        {
+            "type": "message_update",
+            "message_id": msg.id,
+            "status": Message.STATUS_CLOSED,
+            "assigned_to": msg.assigned_to.id if msg.assigned_to else None
+        }
+    )
+
+    return Response(
+        {"status": "replied_with_canned"},
+        status=status.HTTP_200_OK
+    )
+
+@api_view(['POST'])
+def create_canned_response(request):
+    title = request.data.get('title')
+    body = request.data.get('body')
+    if not title or not body:
+        return Response({"detail": "title and body required"}, status=400)
+
+    canned = CannedResponse.objects.create(title=title, body=body)
+    return Response({"id": canned.id, "title": canned.title}, status=201)

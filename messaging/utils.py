@@ -1,5 +1,6 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone as dt_timezone
+from django.utils import timezone
 
 # Keyword weights for priority scoring
 URGENT_KEYWORDS = {
@@ -35,7 +36,11 @@ def calculate_priority(body: str, created_at: datetime, status: str) -> int:
     """
     score = calculate_keyword_score(body)
     # recency: messages less than 2 days old get a small bonus
-    now = datetime.now(timezone.utc)
+    now = timezone.now()
+
+    # Make sure created_at is timezone-aware
+    if timezone.is_naive(created_at):
+        created_at = timezone.make_aware(created_at, dt_timezone.utc)
     age_hours = (now - created_at).total_seconds() / 3600.0
     if age_hours < 48:
         # 2 for less than 24h, 1 for 24-48h

@@ -1,13 +1,14 @@
-# messaging/management/commands/import_messages.py
+import os
+from pathlib import Path
 import pandas as pd
 from django.core.management.base import BaseCommand
 from django.utils import timezone
+from dateutil import parser  # more flexible date parsing
 from messaging.models import Customer, Message
 from messaging.utils import calculate_priority
-import os
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent  # go up to app root
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent  
 CSV_PATH = BASE_DIR / "data" / "GeneralistRails_Project_MessageData.csv"
 
 
@@ -24,24 +25,45 @@ class Command(BaseCommand):
             return
 
         df = pd.read_csv(path)
-        # Normalize columns - common names used below: 'message_id', 'customer_id', 'body', 'created_at'
+        imported = 0
+        failed = 0
+
         for idx, row in df.iterrows():
-            cust_id = str(row.get("User ID") )
-            body = str(row.get("Message Body") )
-            # parse created_at if exists else use now
-            try:
-                created_at = pd.to_datetime(row.get("Timestamp (UTC)"))
-                created_at = created_at.to_pydatetime()
-            except Exception:
+            cust_id = str(row.get("User ID")).strip() if pd.notna(row.get("User ID")) else None
+            body = str(row.get("Message Body")).strip() if pd.notna(row.get("Message Body")) else None
+            timestamp_str = row.get("Timestamp (UTC)")
+
+            # Validate essential fields
+            if not cust_id or not body:
+                failed += 1
+                continue
+
+            # Parse timestamp safely
+            if pd.notna(timestamp_str):
+                try:
+                    created_at = parser.parse(str(timestamp_str))
+                    if timezone.is_naive(created_at):
+                        created_at = timezone.make_aware(created_at, timezone=timezone.get_current_timezone())
+                except Exception:
+                    created_at = timezone.now()
+            else:
                 created_at = timezone.now()
 
-            customer, _ = Customer.objects.get_or_create(customer_id=cust_id)
-            priority = calculate_priority(body, created_at)
+            # Create or get the customer
+            customer, _ = Customer.objects.get_or_create(user_id=cust_id)
+
+            # Calculate priority
+            priority = calculate_priority(body, created_at, "unassigned")
+
+            # Create message safely
             Message.objects.create(
                 customer=customer,
                 body=body,
+                timestamp=created_at,  
                 created_at=created_at,
                 priority=priority,
                 status=Message.STATUS_UNASSIGNED
             )
-        self.stdout.write(self.style.SUCCESS("CSV import completed."))
+            imported += 1
+
+        self.stdout.write(self.style.SUCCESS(f" CSV import completed: {imported} messages imported, {failed} skipped."))
