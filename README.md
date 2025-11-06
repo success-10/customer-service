@@ -146,6 +146,7 @@ python manage.py migrate && python manage.py import_messages && python manage.
 This ensures your production database is also preloaded with demo data for testing.
 
 ## API Endpoints
+```bash
 GET     /api/messages/		        List all messages (supports filtering by ?status= and search query)
 POST    /api/messages/		        Create new customer message
 POST    /api/messages/<id>/claim	Agent claims message for handling
@@ -153,7 +154,7 @@ POST    /api/messages/<id>/reply	Agent sends a custom reply (closes message)
 POST    /api/messages/<id>/canned	Agent replies using canned message
 GET     /api/canned/		        List all canned messages
 POST    /api/canned/		        create new canned message
-
+```
 ## Example Workflows
 ### 1. customer Sends a Message
 ```bash
