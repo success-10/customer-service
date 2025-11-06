@@ -10,7 +10,7 @@ python manage.py migrate
 python seed_data.py
 
 # Import messages
-python import_messages.py || true  
+python manage.py import_messages.py || true  
 
 # Collect static files
 python manage.py collectstatic --noinput
