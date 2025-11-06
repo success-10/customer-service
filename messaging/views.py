@@ -6,28 +6,69 @@ from django.db import transaction
 from django.utils import timezone
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from .models import Message, Agent, CannedResponse
+from .models import Message, Agent, CannedResponse, Customer
 from .serializers import MessageSerializer, CannedResponseSerializer
 from .utils import calculate_priority
+from django.db.models import Q
+
 
 # Create your views here.
 
 
 channel_layer = get_channel_layer()
 
-@api_view(['GET'])
-def list_messages(request):
+@api_view(['GET', 'POST'])
+def messages(request):
     """
-    GET /api/messages/  -> list messages, supports ?status=unassigned or sorting by priority
+    GET /api/messages/  -> list messages (supports ?status=unassigned)
+    POST /api/messages/ -> create a new customer message
     """
-    status_q = request.GET.get('status')
-    qs = Message.objects.all()
-    if status_q:
-        qs = qs.filter(status=status_q)
-    qs = qs.order_by('-priority', 'created_at')[:200]  # limit to first 200 for safety
-    serializer = MessageSerializer(qs, many=True)
-    return Response(serializer.data)
+    if request.method == 'GET':
+        status_q = request.GET.get('status')
+        search_q = request.GET.get('q')
+        qs = Message.objects.all()
 
+        if status_q:
+            qs = qs.filter(status=status_q)
+
+        if search_q:
+            qs = qs.filter(Q(body__icontains=search_q) | Q(customer__user_id__icontains=search_q))
+
+        qs = qs.order_by('-priority', 'created_at')[:200]
+
+        serializer = MessageSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    elif request.method == 'POST':
+        user_id = request.data.get("user_id")
+        body = request.data.get("body")
+
+        if not user_id or not body:
+            return Response({"detail": "user_id and body required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # create or get customer
+        customer, _ = Customer.objects.get_or_create(user_id=user_id)
+
+        msg = Message.objects.create(
+            customer=customer,
+            body=body,
+            status=Message.STATUS_UNASSIGNED,
+            timestamp=timezone.now()
+        )
+
+        # Broadcast to all agents (optional)
+        async_to_sync(channel_layer.group_send)(
+            "agents",
+            {
+                "type": "message_new",
+                "message_id": msg.id,
+                "status": msg.status,
+                "body": msg.body
+            }
+        )
+
+        return Response({"id": msg.id, "status": "created"}, status=status.HTTP_201_CREATED)
+    
 @api_view(['POST'])
 def claim_message(request, message_id):
     """
@@ -89,15 +130,25 @@ def reply_message(request, message_id):
     """
     agent_id = request.data.get('agent_id')
     text = request.data.get('text')
-    if not agent_id or text is None:
-        return Response({"detail": "agent_id and text required"}, status=status.HTTP_400_BAD_REQUEST)
+    if not agent_id or not text or not text.strip():
+        return Response({"detail": "agent_id and non-empty text are required"}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check agent existence first
+    try:
+        agent = Agent.objects.get(id=agent_id)
+    except Agent.DoesNotExist:
+        return Response({"detail": "agent not found"}, status=status.HTTP_404_NOT_FOUND)
     
     try:
         msg = Message.objects.get(id=message_id)
     except Message.DoesNotExist:
         return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
 
-    
+    # Prevent replying to closed messages
+    if msg.status == Message.STATUS_CLOSED:
+        return Response({"detail": "cannot reply to a closed message"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Ensure same agent is replying
     if msg.assigned_to and msg.assigned_to.id != int(agent_id):
         return Response({"detail": "message assigned to another agent"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -119,11 +170,26 @@ def reply_message(request, message_id):
 
     return Response({"status": "replied"}, status=status.HTTP_200_OK)
 
-@api_view(['GET'])
-def list_canned(request):
-    qs = CannedResponse.objects.all()
-    serializer = CannedResponseSerializer(qs, many=True)
-    return Response(serializer.data)
+@api_view(['GET', 'POST'])
+def canned(request):
+    '''
+    GET /api/canned/  -> list canned_messages 
+    POST /api/canned/ -> create a new canned message
+    '''
+    if request.method == 'GET':
+        qs = CannedResponse.objects.all()
+        serializer = CannedResponseSerializer(qs, many=True)
+        return Response(serializer.data)
+    elif request.method == 'POST':
+        title = request.data.get('title')
+        body = request.data.get('body')
+        if not title or not body:
+            return Response({"detail": "title and body required"}, status=400)
+
+        canned = CannedResponse.objects.create(title=title, body=body)
+        return Response({"id": canned.id, "title": canned.title}, status=201)
+
+
 
 @api_view(['POST'])
 def use_canned_reply(request, message_id):
@@ -141,17 +207,31 @@ def use_canned_reply(request, message_id):
             {"detail": "agent_id and canned_id required"},
             status=status.HTTP_400_BAD_REQUEST
         )
-
-    # onfirm existence of agent, canned reply, and message
+    
+    # Validate agent
     try:
         agent = Agent.objects.get(id=agent_id)
+    except Agent.DoesNotExist:
+        return Response({"detail": "agent not found"}, status=status.HTTP_404_NOT_FOUND)
+
+# Validate canned response
+    try:
         canned = CannedResponse.objects.get(id=canned_id)
+    except CannedResponse.DoesNotExist:
+        return Response({"detail": "canned reply not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # Validate message
+    try:
         msg = Message.objects.get(id=message_id)
-    except (Agent.DoesNotExist, CannedResponse.DoesNotExist, Message.DoesNotExist):
+    except Message.DoesNotExist:
+        return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if msg.status == Message.STATUS_CLOSED:
         return Response(
-            {"detail": "agent, canned reply, or message not found"},
-            status=status.HTTP_404_NOT_FOUND
-        )
+            {"detail": "cannot reply to a closed message"},
+            status=status.HTTP_400_BAD_REQUEST
+    )
+
 
     now = timezone.now()
 
@@ -194,12 +274,4 @@ def use_canned_reply(request, message_id):
         status=status.HTTP_200_OK
     )
 
-@api_view(['POST'])
-def create_canned_response(request):
-    title = request.data.get('title')
-    body = request.data.get('body')
-    if not title or not body:
-        return Response({"detail": "title and body required"}, status=400)
 
-    canned = CannedResponse.objects.create(title=title, body=body)
-    return Response({"id": canned.id, "title": canned.title}, status=201)
