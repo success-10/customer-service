@@ -24,15 +24,15 @@ It demonstrates:
 
 2. Work Division (Claiming System): When an agent clicks a message or reply button, they “claim” it. Behind the scenes, a safe database transaction ensures that only one agent can successfully assign themselves to that message or claim that message. If multiple agents attempt to claim it simultaneously, the first succeeds and others receive a “Message already claimed by another agent” response which also include the name of the agent. With this multiple agent can't be responding to the same message at the same time.
 
-Message Reply System: Once an agent claims a message, they can respond to the customer. Replying automatically ###closes### the message and records the timestamp, agent ID, and response body. The system prevents other agents from replying to messages they are not assigned to. 
+3. Message Reply System: Once an agent claims a message, they can respond to the customer. Replying automatically closes the message and records the timestamp, agent ID, and response body. The system prevents other agents from replying to messages they are not assigned to. 
 
-Canned Message Reply:Agents can respond using pre-written templates (“canned responses”) for common inquiries. The chosen canned response is inserted into the reply automatically, closing the message and notifying all agents in real time.
+4. Canned Message Reply:Agents can respond using pre-written templates (“canned responses”) for common inquiries. The chosen canned response is inserted into the reply automatically, closing the message and notifying all agents in real time.
 
-Real-Time Updates via WebSockets: Django Channels and Redis power live updates. When a new message is created, claimed, or closed, all connected agents receive an instant update via WebSockets — no page refresh required.
+5. Real-Time Updates via WebSockets: Django Channels and Redis power live updates. When a new message is created, claimed, or closed, all connected agents receive an instant update via WebSockets — no page refresh required.
 
-CSV Message Import: A management command (import_messages.py) can bulk-import messages from CSV. Each message’s urgency and priority are calculated during import.
+6. CSV Message Import: A management command (import_messages.py) can bulk-import messages from CSV. Each message’s urgency and priority are calculated during import.
 
-Error Handling & Validation: The system checks for missing fields, invalid agent IDs, empty replies, or missing canned responses and returns clear, structured error messages.
+7. Error Handling & Validation: The system checks for missing fields, invalid agent IDs, empty replies, or missing canned responses and returns clear, structured error messages.
 
 ### Advanced Features
 1. Smart Work Division:	Prevents multiple agents from working on the same message using atomic transactions and select_for_update-style locking logic. Only one agent can claim a message at a time.
