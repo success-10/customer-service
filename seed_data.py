@@ -1,8 +1,10 @@
+
 import os
 import django
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'cs_messaging.settings')
 django.setup()
+
 from messaging.models import Agent, CannedResponse
 
 
@@ -26,6 +28,7 @@ def seed():
         print(f"{'Created' if created else 'Already exists'} canned response ID {obj.id}")
 
     print("✅ Seeding complete!")
+
 
 if __name__ == "__main__":
     seed()
