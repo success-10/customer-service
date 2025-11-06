@@ -27,5 +27,6 @@ def seed():
 
     print("✅ Seeding complete!")
 
+
 if __name__ == "__main__":
     seed()
