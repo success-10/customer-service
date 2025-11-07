@@ -186,6 +186,8 @@ def canned(request):
         serializer = CannedResponseSerializer(qs, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
+        print("Body:", request.body)
+        print("Data:", request.data)
         title = request.data.get('title')
         body = request.data.get('body')
         if not title or not body:
