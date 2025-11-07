@@ -225,7 +225,7 @@ python run_claim_test.py
 Seven agents will attempt to claim the same message — only one will succeed, proving the locking system works.
 
 ## Deployment Notes
-**Live Demo** : [customer-service-lt53.onrender.com] (customer-service-lt53.onrender.com) 
+**Live Demo** : [customer-service-lt53.onrender.com](customer-service-lt53.onrender.com) 
 
 Note: there's no home page so hitting the base endpoint can lead to page not found error. so when testing, test with the available endpoint
 
