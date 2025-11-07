@@ -20,15 +20,15 @@ It demonstrates:
 
 ## Features Implemented
 ### Core Messaging Features
-1. Message Management: Customers send messages via a REST API. When a message arrives, it’s stored in the database as “unassigned,” waiting for an agent. Agents can then view and filter messages by status (unassigned, in progress, or closed).
+1. Message Management: Customers send messages via a REST API. When a message arrives, it’s stored in the database as **unassigned**, waiting for an agent. Agents can then view and filter messages by status **(unassigned, in progress, or closed)**.
 
-2. Work Division (Claiming System): When an agent clicks a message or reply button, they “claim” it. Behind the scenes, a safe database transaction ensures that only one agent can successfully assign themselves to that message or claim that message. If multiple agents attempt to claim it simultaneously, the first succeeds and others receive a “Message already claimed by another agent” response which also include the name of the agent. With this multiple agent can't be responding to the same message at the same time.
+2. Work Division (Claiming System): When an agent clicks a message or reply button, they **claim** it. Behind the scenes, a safe database transaction ensures that only one agent can successfully assign themselves to that message or claim that message. If multiple agents attempt to claim it simultaneously, the first succeeds and others receive a **Message already claimed by another agent** response which also include the name of the agent. With this multiple agent can't be responding to the same message at the same time.
 
-3. Message Reply System: Once an agent claims a message, they can respond to the customer. Replying automatically closes the message and records the timestamp, agent ID, and response body. The system prevents other agents from replying to messages they are not assigned to. 
+3. Message Reply System: Once an agent claims a message, they can respond to the customer. Replying automatically **closes** the message and records the timestamp, agent ID, and response body. The system prevents other agents from replying to messages they are not assigned to. 
 
-4. Canned Message Reply:Agents can respond using pre-written templates (“canned responses”) for common inquiries. The chosen canned response is inserted into the reply automatically, closing the message and notifying all agents in real time.
+4. Canned Message Reply:Agents can respond using pre-written templates (**canned responses**) for common inquiries. The chosen canned response is inserted into the reply automatically, closing the message and notifying all agents in real time.
 
-5. Real-Time Updates via WebSockets: Django Channels and Redis power live updates. When a new message is created, claimed, or closed, all connected agents receive an instant update via WebSockets — no page refresh required.
+5. Real-Time Updates via WebSockets: Django Channels and Redis power live updates. When a new message is **created**, **claimed**, or **closed**, all connected agents receive an instant update via WebSockets — no page refresh required.
 
 6. CSV Message Import: A management command (import_messages.py) can bulk-import messages from CSV. Each message’s urgency and priority are calculated during import.
 
@@ -37,9 +37,9 @@ It demonstrates:
 ### Advanced Features
 1. Smart Work Division:	Prevents multiple agents from working on the same message using atomic transactions and select_for_update-style locking logic. Only one agent can claim a message at a time.
 
-2. Urgency Detection: Each incoming message’s text is analyzed for keywords like “loan”, “urgent”, “disbursement," e.t.c. Messages are automatically prioritized higher if they relate to critical financial actions or time-sensitive issues.
+2. Urgency Detection: Each incoming message’s text is analyzed for keywords like **loan**, **urgent**, **disbursement**, e.t.c. Messages are automatically prioritized higher if they relate to critical financial actions or time-sensitive issues.
 
-3. Search Functionality: Agents can search messages or status of meassage (closed, unassigned and inprogress) using query parameters. For instance, searching for a text snippet in the message body.
+3. Search Functionality: Agents can search messages or status of meassage (**closed**, **unassigned** and **inprogress**) using query parameters. For instance, searching for a text snippet in the message body.
 
 4. Customer Context Enrichment:	Each message is linked to a Customer profile. This allows agents to view more details of the customer directly alongside the message.
 
@@ -47,7 +47,7 @@ It demonstrates:
 
 6. Real-Time Interactivity:	Through WebSockets, all agent dashboards receive live notifications when: a new message is sent, a message is claimed by someone else, or a message is closed.
 
-7. Robust Error & Status Feedback: Every API endpoint provides detailed feedback — such as “agent not found”, “message already closed”, or “empty reply text not allowed”.
+7. Robust Error & Status Feedback: Every API endpoint provides detailed feedback — such as **agent not found**, **message already closed**, or **empty reply text not allowed*8.
 
 ## Tech Stack
 1. Backend: Django 5 + Django REST Framework
@@ -225,6 +225,9 @@ python run_claim_test.py
 Seven agents will attempt to claim the same message — only one will succeed, proving the locking system works.
 
 ## Deployment Notes
+**Live Demo** : [customer-service-lt53.onrender.com] (customer-service-lt53.onrender.com) 
+
+Note: there's no home page so hitting the base endpoint can lead to page not found error. so when testing, test with the available endpoint
 
 1.Ensure Redis and MySQL services are running.
 
