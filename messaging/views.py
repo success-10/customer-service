@@ -10,7 +10,6 @@ from .models import Message, Agent, CannedResponse, Customer
 from .serializers import MessageSerializer, CannedResponseSerializer
 from .utils import calculate_priority
 from django.db.models import Q
-from django.views.decorators.csrf import csrf_exempt
 
 
 # Create your views here.
@@ -18,7 +17,6 @@ from django.views.decorators.csrf import csrf_exempt
 
 channel_layer = get_channel_layer()
 
-@csrf_exempt
 @api_view(['GET', 'POST'])
 def messages(request):
     """
@@ -71,7 +69,7 @@ def messages(request):
 
         return Response({"id": msg.id, "status": "created"}, status=status.HTTP_201_CREATED)
 
-@csrf_exempt   
+
 @api_view(['POST'])
 def claim_message(request, message_id):
     """
@@ -124,7 +122,7 @@ def claim_message(request, message_id):
             except Message.DoesNotExist:
                 return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
 
-@csrf_exempt
+
 @api_view(['POST'])
 def reply_message(request, message_id):
     """
@@ -174,7 +172,7 @@ def reply_message(request, message_id):
 
     return Response({"status": "replied"}, status=status.HTTP_200_OK)
 
-@csrf_exempt
+
 @api_view(['GET', 'POST'])
 def canned(request):
     '''
@@ -186,8 +184,6 @@ def canned(request):
         serializer = CannedResponseSerializer(qs, many=True)
         return Response(serializer.data)
     elif request.method == 'POST':
-        print("Body:", request.body)
-        print("Data:", request.data)
         title = request.data.get('title')
         body = request.data.get('body')
         if not title or not body:
@@ -197,7 +193,7 @@ def canned(request):
         return Response({"id": canned.id, "title": canned.title}, status=201)
 
 
-@csrf_exempt
+
 @api_view(['POST'])
 def use_canned_reply(request, message_id):
     """
