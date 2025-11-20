@@ -95,12 +95,15 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'cs_messaging',
-        'USER': 'root',
+        'USER': 'The user',
         'PASSWORD': 'yourpassword',
         'HOST': '127.0.0.1',
         'PORT': '3306',
+        'OPTIONS': {"init_command": "SET sql_mode='STRICT_TRANS_TABLES'"},
     }
 }
+
+DEBUG = True
 ```
 Then run migrations:
 ```bash

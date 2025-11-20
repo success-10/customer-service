@@ -10,12 +10,28 @@ from .models import Message, Agent, CannedResponse, Customer
 from .serializers import MessageSerializer, CannedResponseSerializer
 from .utils import calculate_priority
 from django.db.models import Q
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+
 
 
 # Create your views here.
 
 
 channel_layer = get_channel_layer()
+
+@swagger_auto_schema(
+    methods=['post'],
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['user_id', 'body'],
+        properties={
+            'user_id': openapi.Schema(type=openapi.TYPE_STRING, description="Customer's user ID"),
+            'body': openapi.Schema(type=openapi.TYPE_STRING, description="Message content"),
+        },
+    ),
+    responses={201: "Message created"},
+)
 
 @api_view(['GET', 'POST'])
 def messages(request):
@@ -69,6 +85,21 @@ def messages(request):
 
         return Response({"id": msg.id, "status": "created"}, status=status.HTTP_201_CREATED)
 
+@swagger_auto_schema(
+    method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['agent_id'],
+        properties={
+            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER, description="ID of agent claiming the message"),
+        },
+    ),
+    responses={
+        200: "Successfully claimed",
+        409: "Already claimed",
+        404: "Message not found",
+    },
+)
 
 @api_view(['POST'])
 def claim_message(request, message_id):
@@ -122,6 +153,24 @@ def claim_message(request, message_id):
             except Message.DoesNotExist:
                 return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
 
+@swagger_auto_schema(
+    method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['agent_id', 'text'],
+        properties={
+            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+            'text': openapi.Schema(type=openapi.TYPE_STRING),
+        },
+    ),
+    responses={
+        200: "Reply saved",
+        400: "Cannot reply / invalid input",
+        403: "Assigned to another agent",
+        404: "Message or agent not found",
+    },
+)
+
 
 @api_view(['POST'])
 def reply_message(request, message_id):
@@ -172,6 +221,18 @@ def reply_message(request, message_id):
 
     return Response({"status": "replied"}, status=status.HTTP_200_OK)
 
+@swagger_auto_schema(
+    methods=['post'],
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['title', 'body'],
+        properties={
+            'title': openapi.Schema(type=openapi.TYPE_STRING),
+            'body': openapi.Schema(type=openapi.TYPE_STRING),
+        },
+    ),
+    responses={201: "Canned message created"},
+)
 
 @api_view(['GET', 'POST'])
 def canned(request):
@@ -192,7 +253,22 @@ def canned(request):
         canned = CannedResponse.objects.create(title=title, body=body)
         return Response({"id": canned.id, "title": canned.title}, status=201)
 
-
+@swagger_auto_schema(
+    method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        required=['agent_id', 'canned_id'],
+        properties={
+            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+            'canned_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+        },
+    ),
+    responses={
+        200: "Replied with canned message",
+        400: "Bad request / cannot reply",
+        404: "Agent / canned reply / message not found",
+    },
+)
 
 @api_view(['POST'])
 def use_canned_reply(request, message_id):
