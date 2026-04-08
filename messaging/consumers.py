@@ -19,3 +19,6 @@ class AgentConsumer(AsyncWebsocketConsumer):
     async def message_update(self, event):
         # event is a dict with keys: 'message_id', 'status', 'assigned_to'
         await self.send(text_data=json.dumps(event))
+
+    async def message_new(self, event):
+        await self.send(text_data=json.dumps(event))

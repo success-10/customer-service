@@ -1,0 +1,150 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 225 25% 8%;
+    --foreground: 210 20% 92%;
+
+    --card: 225 20% 12%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 225 20% 14%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 168 80% 50%;
+    --primary-foreground: 225 25% 8%;
+
+    --secondary: 225 15% 18%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 225 15% 16%;
+    --muted-foreground: 215 15% 55%;
+
+    --accent: 260 60% 60%;
+    --accent-foreground: 210 20% 95%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 225 15% 20%;
+    --input: 225 15% 20%;
+    --ring: 168 80% 50%;
+
+    --radius: 0.75rem;
+
+    --glass-bg: 225 20% 12% / 0.6;
+    --glass-border: 225 15% 30% / 0.3;
+    --glass-shadow: 225 50% 5% / 0.4;
+
+    --priority-critical: 0 85% 60%;
+    --priority-high: 30 90% 55%;
+    --priority-medium: 45 90% 55%;
+    --priority-low: 168 80% 50%;
+
+    --status-unassigned: 45 90% 55%;
+    --status-in-progress: 210 80% 60%;
+    --status-resolved: 168 80% 50%;
+
+    --sidebar-background: 225 22% 10%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 168 80% 50%;
+    --sidebar-primary-foreground: 225 25% 8%;
+    --sidebar-accent: 225 15% 18%;
+    --sidebar-accent-foreground: 210 20% 85%;
+    --sidebar-border: 225 15% 20%;
+    --sidebar-ring: 168 80% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-card/60 backdrop-blur-xl border border-glass-border rounded-xl shadow-glass;
+  }
+
+  .glass-panel-hover {
+    @apply glass-panel transition-all duration-300 hover:bg-card/80 hover:border-primary/20 hover:shadow-glass-glow;
+  }
+
+  .priority-badge {
+    @apply px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .glow-text {
+    @apply text-primary drop-shadow-[0_0_8px_hsl(168_80%_50%/0.4)];
+  }
+
+  .agent-card {
+    @apply glass-panel-hover p-6 cursor-pointer flex flex-col items-center gap-4;
+  }
+
+  .agent-card:hover .agent-avatar {
+    @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
+  .inbox-row {
+    @apply glass-panel-hover p-4 cursor-pointer flex items-center gap-4;
+  }
+
+  .workspace-panel {
+    @apply glass-panel p-6 h-full flex flex-col;
+  }
+
+  .nav-link {
+    @apply flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-muted-foreground transition-all duration-200;
+  }
+
+  .nav-link:hover {
+    @apply bg-secondary text-foreground;
+  }
+
+  .nav-link-active {
+    @apply bg-primary/10 text-primary border border-primary/20;
+  }
+}
+
+@layer utilities {
+  .animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.3s ease-out;
+  }
+
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.4s ease-out;
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}

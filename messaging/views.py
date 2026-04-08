@@ -1,356 +1,177 @@
-from django.shortcuts import render
-from rest_framework.decorators import api_view
+from rest_framework import viewsets, mixins
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from django.db import transaction
 from django.utils import timezone
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-from .models import Message, Agent, CannedResponse, Customer
-from .serializers import MessageSerializer, CannedResponseSerializer
-from .utils import calculate_priority
-from django.db.models import Q
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from .models import Message, CannedResponse, Agent
+from .serializers import (
+    MessageSerializer, 
+    CannedResponseSerializer,
+    AgentSerializer,
+    MessageCreateSerializer,
+    MessageClaimSerializer,
+    MessageReplySerializer,
+    MessageCannedReplySerializer,
+    CustomerReplySerializer
+)
+from .services import MessageService, ApplicationError
+from .selectors import MessageSelector
+from .utils import generic_response
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-
-
-# Create your views here.
-
-
-channel_layer = get_channel_layer()
-
-@swagger_auto_schema(
-    methods=['post'],
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['user_id', 'body'],
-        properties={
-            'user_id': openapi.Schema(type=openapi.TYPE_STRING, description="Customer's user ID"),
-            'body': openapi.Schema(type=openapi.TYPE_STRING, description="Message content"),
-        },
-    ),
-    responses={201: "Message created"},
-)
-
-@api_view(['GET', 'POST'])
-def messages(request):
+class MessageViewSet(viewsets.ModelViewSet):
     """
-    GET /api/messages/  -> list messages (supports ?status=unassigned)
-    POST /api/messages/ -> create a new customer message
+    ViewSet for handling messages (List, Create, Claim, Reply, Canned).
     """
-    if request.method == 'GET':
-        status_q = request.GET.get('status')
-        search_q = request.GET.get('q')
-        qs = Message.objects.all()
-
-        if status_q:
-            qs = qs.filter(status=status_q)
-
-        if search_q:
-            qs = qs.filter(Q(body__icontains=search_q) | Q(customer__user_id__icontains=search_q))
-
-        qs = qs.order_by('-priority', 'created_at')[:200]
-
-        serializer = MessageSerializer(qs, many=True)
-        return Response(serializer.data)
-
-    elif request.method == 'POST':
-        user_id = request.data.get("user_id")
-        body = request.data.get("body")
-
-        if not user_id or not body:
-            return Response({"detail": "user_id and body required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # create or get customer
-        customer, _ = Customer.objects.get_or_create(user_id=user_id)
-
-        msg = Message.objects.create(
-            customer=customer,
-            body=body,
-            status=Message.STATUS_UNASSIGNED,
-            timestamp=timezone.now()
-        )
-
-        # Broadcast to all agents (optional)
-        async_to_sync(channel_layer.group_send)(
-            "agents",
-            {
-                "type": "message_new",
-                "message_id": msg.id,
-                "status": msg.status,
-                "body": msg.body
-            }
-        )
-
-        return Response({"id": msg.id, "status": "created"}, status=status.HTTP_201_CREATED)
-
-@swagger_auto_schema(
-    method='post',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['agent_id'],
-        properties={
-            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER, description="ID of agent claiming the message"),
-        },
-    ),
-    responses={
-        200: "Successfully claimed",
-        409: "Already claimed",
-        404: "Message not found",
-    },
-)
-
-@api_view(['POST'])
-def claim_message(request, message_id):
-    """
-    POST /api/messages/<id>/claim
-    body: {"agent_id": 1}
-    Uses an atomic SQL UPDATE to claim only if still unassigned.
-    """
-    agent_id = request.data.get('agent_id')
-    if not agent_id:
-        return Response({"detail": "agent_id required"}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        agent = Agent.objects.get(id=agent_id)
-    except Agent.DoesNotExist:
-        return Response({"detail": "Invalid agent_id"}, status=400)
+    serializer_class = MessageSerializer
+    lookup_field = 'external_id'
     
-    now = timezone.now()
+    def get_queryset(self):
+        status_q = self.request.query_params.get('status')
+        search_q = self.request.query_params.get('q')
+        return MessageSelector.get_priority_inbox(status_q, search_q)
 
-    with transaction.atomic():
-        updated_rows = Message.objects.filter(
-            id=message_id,
-            status=Message.STATUS_UNASSIGNED
-        ).update(
-            assigned_to=agent,
-            status=Message.STATUS_IN_PROGRESS,
-            claimed_at=now
+    @swagger_auto_schema(
+        request_body=MessageCreateSerializer,
+        responses={201: "Message created"}
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = MessageCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        msg = MessageService.create_message(
+            user_id=serializer.validated_data.get("user_id"), 
+            body=serializer.validated_data.get("body"),
+            name=serializer.validated_data.get("name"),
+            phone=serializer.validated_data.get("phone"),
+            email=serializer.validated_data.get("email")
+        )
+        
+        return generic_response(
+            data={"external_id": str(msg.external_id)}, 
+            message="Message created successfully",
+            status_code=status.HTTP_201_CREATED
         )
 
-        if updated_rows == 1:
-            # Successful claim; broadcast update
-            async_to_sync(channel_layer.group_send)(
-                "agents",
-                {
-                    "type": "message_update",
-                    "message_id": int(message_id),
-                    "status": Message.STATUS_IN_PROGRESS,
-                    "assigned_to": int(agent_id)
-                }
+    @swagger_auto_schema(
+        method='post',
+        request_body=MessageClaimSerializer,
+        responses={200: "Successfully claimed", 409: "Already claimed", 404: "Message not found"}
+    )
+    @action(detail=True, methods=['post'])
+    def claim(self, request, external_id=None):
+        serializer = MessageClaimSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            msg = MessageService.claim_message(
+                message_external_id=external_id, 
+                agent_external_id=str(serializer.validated_data['agent_id'])
             )
-            return Response({"status": "claimed",
-                            "message_id": int(message_id),
-                            "claimed_by": int(agent_id)
-                        }, status=status.HTTP_200_OK)
-        else:
-            # Already claimed: fetch current assignee for message
-            try:
-                msg = Message.objects.get(id=message_id)
-                assigned = msg.assigned_to.name if msg.assigned_to else None
-                return Response({"status": "already_claimed", "by": assigned}, status=status.HTTP_409_CONFLICT)
-            except Message.DoesNotExist:
-                return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
-
-@swagger_auto_schema(
-    method='post',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['agent_id', 'text'],
-        properties={
-            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-            'text': openapi.Schema(type=openapi.TYPE_STRING),
-        },
-    ),
-    responses={
-        200: "Reply saved",
-        400: "Cannot reply / invalid input",
-        403: "Assigned to another agent",
-        404: "Message or agent not found",
-    },
-)
-
-
-@api_view(['POST'])
-def reply_message(request, message_id):
-    """
-    POST /api/messages/<id>/reply
-    body: {"agent_id":1, "text": "reply here" }
-    Stores reply, marks message closed, broadcasts update.
-    """
-    agent_id = request.data.get('agent_id')
-    text = request.data.get('text')
-    if not agent_id or not text or not text.strip():
-        return Response({"detail": "agent_id and non-empty text are required"}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Check agent existence first
-    try:
-        agent = Agent.objects.get(id=agent_id)
-    except Agent.DoesNotExist:
-        return Response({"detail": "agent not found"}, status=status.HTTP_404_NOT_FOUND)
-    
-    try:
-        msg = Message.objects.get(id=message_id)
-    except Message.DoesNotExist:
-        return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    # Prevent replying to closed messages
-    if msg.status == Message.STATUS_CLOSED:
-        return Response({"detail": "cannot reply to a closed message"}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Ensure same agent is replying
-    if msg.assigned_to and msg.assigned_to.id != int(agent_id):
-        return Response({"detail": "message assigned to another agent"}, status=status.HTTP_403_FORBIDDEN)
-
-    msg.response = text
-    msg.responded_at = timezone.now()
-    msg.status = Message.STATUS_CLOSED
-    msg.save()
-
-    # Broadcast closed status to all agents
-    async_to_sync(channel_layer.group_send)(
-        "agents",
-        {
-            "type": "message_update",
-            "message_id": msg.id,
-            "status": Message.STATUS_CLOSED,
-            "assigned_to": msg.assigned_to.id if msg.assigned_to else None
-        }
-    )
-
-    return Response({"status": "replied"}, status=status.HTTP_200_OK)
-
-@swagger_auto_schema(
-    methods=['post'],
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['title', 'body'],
-        properties={
-            'title': openapi.Schema(type=openapi.TYPE_STRING),
-            'body': openapi.Schema(type=openapi.TYPE_STRING),
-        },
-    ),
-    responses={201: "Canned message created"},
-)
-
-@api_view(['GET', 'POST'])
-def canned(request):
-    '''
-    GET /api/canned/  -> list canned_messages 
-    POST /api/canned/ -> create a new canned message
-    '''
-    if request.method == 'GET':
-        qs = CannedResponse.objects.all()
-        serializer = CannedResponseSerializer(qs, many=True)
-        return Response(serializer.data)
-    elif request.method == 'POST':
-        title = request.data.get('title')
-        body = request.data.get('body')
-        if not title or not body:
-            return Response({"detail": "title and body required"}, status=400)
-
-        canned = CannedResponse.objects.create(title=title, body=body)
-        return Response({"id": canned.id, "title": canned.title}, status=201)
-
-@swagger_auto_schema(
-    method='post',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        required=['agent_id', 'canned_id'],
-        properties={
-            'agent_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-            'canned_id': openapi.Schema(type=openapi.TYPE_INTEGER),
-        },
-    ),
-    responses={
-        200: "Replied with canned message",
-        400: "Bad request / cannot reply",
-        404: "Agent / canned reply / message not found",
-    },
-)
-
-@api_view(['POST'])
-def use_canned_reply(request, message_id):
-    """
-    POST /api/messages/<id>/use_canned
-    body: {"agent_id":1, "canned_id": 3}
-    Applies a canned response and marks the message as closed.
-    """
-    agent_id = request.data.get('agent_id')
-    canned_id = request.data.get('canned_id')
-
-    # Validate inputs
-    if not agent_id or not canned_id:
-        return Response(
-            {"detail": "agent_id and canned_id required"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Validate agent
-    try:
-        agent = Agent.objects.get(id=agent_id)
-    except Agent.DoesNotExist:
-        return Response({"detail": "agent not found"}, status=status.HTTP_404_NOT_FOUND)
-
-# Validate canned response
-    try:
-        canned = CannedResponse.objects.get(id=canned_id)
-    except CannedResponse.DoesNotExist:
-        return Response({"detail": "canned reply not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    # Validate message
-    try:
-        msg = Message.objects.get(id=message_id)
-    except Message.DoesNotExist:
-        return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
-
-    if msg.status == Message.STATUS_CLOSED:
-        return Response(
-            {"detail": "cannot reply to a closed message"},
-            status=status.HTTP_400_BAD_REQUEST
-    )
-
-
-    now = timezone.now()
-
-    # Safely assign if message is unassigned
-    with transaction.atomic():
-        if msg.status == Message.STATUS_UNASSIGNED:
-            updated_rows = Message.objects.filter(
-                id=message_id,
-                status=Message.STATUS_UNASSIGNED
-            ).update(
-                assigned_to=agent,
-                status=Message.STATUS_IN_PROGRESS,
-                claimed_at=now
+            return generic_response(
+                data={
+                    "message_external_id": str(msg.external_id), 
+                    "claimed_by": msg.assigned_to.name
+                },
+                message="Message successfully claimed"
+            )
+        except ApplicationError as e:
+            msg_str = str(e)
+            if "already_claimed" in msg_str:
+                return generic_response(
+                    data={"by": msg_str.split(":")[1] if ":" in msg_str else "Unknown"},
+                    message="already_claimed",
+                    success=False,
+                    status_code=status.HTTP_409_CONFLICT
+                )
+            return generic_response(
+                message=msg_str,
+                success=False,
+                status_code=status.HTTP_400_BAD_REQUEST
             )
 
-            # Re-fetch message if assigned successfully
-            if updated_rows:
-                msg.refresh_from_db()
-
-        # Apply canned reply
-        msg.response = canned.body
-        msg.responded_at = now
-        msg.status = Message.STATUS_CLOSED
-        msg.assigned_to = agent
-        msg.save()
-
-    # Broadcast message closure to all agents
-    async_to_sync(channel_layer.group_send)(
-        "agents",
-        {
-            "type": "message_update",
-            "message_id": msg.id,
-            "status": Message.STATUS_CLOSED,
-            "assigned_to": msg.assigned_to.id if msg.assigned_to else None
-        }
+    @swagger_auto_schema(
+        method='post',
+        request_body=MessageReplySerializer
     )
+    @action(detail=True, methods=['post'])
+    def reply(self, request, external_id=None):
+        serializer = MessageReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            MessageService.reply_message(
+                message_external_id=external_id, 
+                agent_external_id=str(serializer.validated_data['agent_id']), 
+                text=serializer.validated_data['text']
+            )
+            return generic_response(message="Reply sent successfully")
+        except ApplicationError as e:
+            return generic_response(
+                message=str(e),
+                success=False,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
-    return Response(
-        {"status": "replied_with_canned"},
-        status=status.HTTP_200_OK
+    @swagger_auto_schema(
+        method='post',
+        request_body=MessageCannedReplySerializer
     )
+    @action(detail=True, methods=['post'])
+    def use_canned(self, request, external_id=None):
+        serializer = MessageCannedReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            MessageService.use_canned_reply(
+                message_external_id=external_id, 
+                agent_external_id=str(serializer.validated_data['agent_id']), 
+                canned_external_id=str(serializer.validated_data['canned_id'])
+            )
+            return generic_response(message="Replied with canned response")
+        except ApplicationError as e:
+            return generic_response(
+                message=str(e),
+                success=False,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+    @swagger_auto_schema(
+        method='post',
+        request_body=CustomerReplySerializer
+    )
+    @action(detail=True, methods=['post'])
+    def customer_reply(self, request, external_id=None):
+        serializer = CustomerReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            MessageService.customer_reply(
+                message_external_id=external_id, 
+                text=serializer.validated_data['text']
+            )
+            return generic_response(message="Customer reply sent successfully")
+        except ApplicationError as e:
+            return generic_response(
+                message=str(e),
+                success=False,
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
 
+class CannedResponseViewSet(viewsets.ModelViewSet):
+    queryset = CannedResponse.objects.all()
+    serializer_class = CannedResponseSerializer
+    lookup_field = 'external_id'
+
+    @method_decorator(cache_page(60 * 60 * 2))  # Cache for 2 hours
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+class AgentViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Agent.objects.all()
+    serializer_class = AgentSerializer
+    lookup_field = 'external_id'

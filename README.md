@@ -1,239 +1,136 @@
-# Customer Support Messaging System (Django + WebSockets)
-## Overview
+<p align="center">
+  <h1 align="center"> Agent Connect Hub</h1>
+  <p align="center">
+    <strong>A high-performance, real-time Customer Support Messaging Engine built for concurrency.</strong>
+    <br/>
+    Built with React, Django REST Framework, and Django Channels (WebSockets).
+  </p>
+</p>
 
-This project is a Customer Support Messaging Platform built with Django and Django Channels.
-It allows customers to send messages and support agents to manage them collaboratively with real-time updates, automatic prioritization, and concurrency-safe task distribution.
+---
 
-It demonstrates:
+## 🎯 The 60-Second Pitch
 
-1. REST API endpoints for managing messages, canned responses, and agents.
+Why look at another CRUD app? **Agent Connect Hub** isn't just about reading and writing tickets. It's a demonstration of solving complex, real-time backend problems. 
 
-2. WebSocket integration using Django Channels for real-time updates (e.g. message claimed or closed).
+This project tackles the **"Concurrency Problem"** in customer support: *What happens when 50 agents try to claim the exact same ticket at the exact same millisecond?*
 
-3. Concurrency-safe message claiming logic.
+Instead of relying on basic models, this backend engine uses raw database-level locking (`select_for_update(skip_locked=True)`) to guarantee atomic ticket claims. It pairs this with a persistent **WebSocket (ASGI)** connection layer to instantly broadcast ticket states across all connected agent dashboards, and a robust **Threaded Reply Engine** for infinite conversational ping-pong between agents and customers.
 
-4. CSV import of existing customer messages.
+### 🔐 Where's the Authentication?
+If you're wondering why you don't need a username and password to log in, **that is highly intentional.** 
 
-5. Smart task division among multiple agents
+This project was built as a portfolio showcase to demonstrate complex **Real-Time Data Flow, Concurrency, and State Management**, rather than basic JWT/OAuth flows. To eliminate friction for reviewers and recruiters, the application operates on an "Agent Persona" basis. You simply click an Agent card to immediately adopt their session state and drop directly into the action.
 
-6. Efficient backend communication between agents and customers.
+---
 
-## Features Implemented
-### Core Messaging Features
-1. Message Management: Customers send messages via a REST API. When a message arrives, it’s stored in the database as **unassigned**, waiting for an agent. Agents can then view and filter messages by status **(unassigned, in progress, or closed)**.
+## 🧠 What's Going On Behind The Scenes?
 
-2. Work Division (Claiming System): When an agent clicks a message or reply button, they **claim** it. Behind the scenes, a safe database transaction ensures that only one agent can successfully assign themselves to that message or claim that message. If multiple agents attempt to claim it simultaneously, the first succeeds and others receive a **Message already claimed by another agent** response which also include the name of the agent. With this multiple agent can't be responding to the same message at the same time.
+- **Real-Time WebSockets (Django Channels & Daphne):** The moment a customer submits a ticket via the Customer Portal, a WebSocket broadcast fires via `AgentConsumer`. The React frontend mathematically evaluates the ticket priority and instantly injects it into every active agent's inbox—no page refreshes required.
+- **Race-Condition Proof Ticket Claiming:** When an agent clicks "Claim", the backend initiates a transactional block utilizing PostgreSQL/SQLite Row-Level Locks. If another agent beats them to the Database by 1ms, they get a graceful "Already Claimed" rejection, preventing assignment collisions.
+- **Infinite Threaded Architecture:** The database schema completely separated `Messages` from `MessageReplies`, linked via Foreign Keys. This allows an unlimited, chronological back-and-forth chain of interactions between the customer and the agent without overwriting data fields.
+- **Pagination & Caching:** Out of the box, the system restricts inbox fetching to 20-items per page to save frontend memory, while the Canned Responses API is heavily memoized using Django's `@cache_page` for immediate delivery.
 
-3. Message Reply System: Once an agent claims a message, they can respond to the customer. Replying automatically **closes** the message and records the timestamp, agent ID, and response body. The system prevents other agents from replying to messages they are not assigned to. 
+---
 
-4. Canned Message Reply:Agents can respond using pre-written templates (**canned responses**) for common inquiries. The chosen canned response is inserted into the reply automatically, closing the message and notifying all agents in real time.
+## 🛠 Technology Stack
 
-5. Real-Time Updates via WebSockets: Django Channels and Redis power live updates. When a new message is **created**, **claimed**, or **closed**, all connected agents receive an instant update via WebSockets — no page refresh required.
+### Backend
+* **Python / Django 5.x:** The core MVC brain.
+* **Django REST Framework (DRF):** Service/Selector layered API architecture.
+* **Django Channels & Daphne:** ASGI server handling raw WebSocket streams.
+* **SQLite / PostgreSQL:** Fully transactional database queries.
 
-6. CSV Message Import: A management command (import_messages.py) can bulk-import messages from CSV. Each message’s urgency and priority are calculated during import.
+### Frontend
+* **React 18 & TypeScript:** Strict typing for data-heavy ticket payloads.
+* **Vite:** Next-generation, blazing fast bundler.
+* **Tailwind CSS & Lucide Icons:** For the sleek, glass-morphism dashboard layout.
+* **Zustand:** Global state management for maintaining active Agent/Inbox state.
 
-7. Error Handling & Validation: The system checks for missing fields, invalid agent IDs, empty replies, or missing canned responses and returns clear, structured error messages.
+---
 
-### Advanced Features
-1. Smart Work Division:	Prevents multiple agents from working on the same message using atomic transactions and select_for_update-style locking logic. Only one agent can claim a message at a time.
+## 🚀 Step-by-Step Setup Guide
 
-2. Urgency Detection: Each incoming message’s text is analyzed for keywords like **loan**, **urgent**, **disbursement**, e.t.c. Messages are automatically prioritized higher if they relate to critical financial actions or time-sensitive issues.
+You can run this entire high-performance engine locally on your machine in just a few minutes.
 
-3. Search Functionality: Agents can search messages or status of meassage (**closed**, **unassigned** and **inprogress**) using query parameters. For instance, searching for a text snippet in the message body.
+### 1. Backend (Django) Setup
 
-4. Customer Context Enrichment:	Each message is linked to a Customer profile. This allows agents to view more details of the customer directly alongside the message.
+1. Open your terminal and navigate to the project root:
+   ```bash
+   cd cs_messaging
+   ```
+2. Create and activate a Virtual Environment:
+   ```bash
+   python -m venv .venv
+   # Windows
+   .venv\Scripts\activate
+   # Mac/Linux
+   source .venv/bin/activate
+   ```
+3. Install the dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **Environment Variables**:
+   Create a `.env` file in the root `cs_messaging` directory (next to `manage.py`) with the following necessary keys:
+   ```env
+   SECRET_KEY=your_secure_django_secret_key_here
+   REDIS_URL=redis://127.0.0.1:6379/1
+   DATABASE_URL=mysql://root:root@127.0.0.1:3306/cs_messaging_db
+   ```
+   *(Update the credentials above based on your local MySQL setup)*
 
-5. Canned Messages (Predefined Replies): Agents can save time by using stock responses stored in the CannedResponse model. Each canned message can be selected and used instantly.
+5. Run the database migrations (This creates the core MySQL schema):
+   ```bash
+   python manage.py makemigrations
+   python manage.py migrate
+   ```
+6. **Start Redis**:
+   Ensure you have Redis installed and running in the background, as it's required for Django Channels (WebSockets) and Celery task queuing.
+   ```bash
+   redis-server
+   ```
+7. **Start Celery**:
+   In a new terminal window (with the venv activated), start the Celery worker to handle background tasks:
+   ```bash
+   celery -A cs_messaging worker -l INFO
+   ```
+8. **Load The Showcase Data!**
+   To give you something to look at immediately, I've included Django management scripts that inject your database with Agents, Canned Responses, and mock Customer Tickets:
+   ```bash
+   python manage.py import_messages
+   python manage.py seed_data
+   ```
+9. Start the ASGI server (Daphne):
+   ```bash
+   python manage.py runserver
+   ```
+   *Your backend is now fully running at `http://127.0.0.1:8000/`*
 
-6. Real-Time Interactivity:	Through WebSockets, all agent dashboards receive live notifications when: a new message is sent, a message is claimed by someone else, or a message is closed.
+### 2. Frontend (React) Setup
 
-7. Robust Error & Status Feedback: Every API endpoint provides detailed feedback — such as **agent not found**, **message already closed**, or **empty reply text not allowed*8.
+1. Open a **new, second terminal window** and navigate to the frontend directory:
+   ```bash
+   cd cs_messaging/agent-connect-hub-main
+   ```
+2. Install the Node packages:
+   ```bash
+   npm install
+   ```
+3. Boot the Vite Dev Server:
+   ```bash
+   npm run dev
+   ```
+   *Your shiny new frontend is now running at `http://127.0.0.1:5173/`*
 
-## Tech Stack
-1. Backend: Django 5 + Django REST Framework
+---
 
-2. Real-Time: Django Channels + Redis
+##  How to Tour the App
 
-3. Database: MySQL
+Now that both servers are running, here's how to experience the platform:
 
-4. Data Processing: Pandas (for CSV imports)
-
-5. Testing & Simulation: Python requests + threading for concurrency tests
-
-6. Deployment Ready: Works with Render, Docker, or any ASGI-compatible platform
-
-## Setup & Installation Guide
-### Step 1. Clone Repository
-
-```bash
-git clone https://github.com/success-10/cs_messaging.git
-cd cs_messaging
-
-```
-
-### Step 2. Virtual Environment
-```bash
-python -m venv .venv
-.venv\Scripts\activate      # Windows
-# or
-source .venv/bin/activate   # macOS/Linux
-```
-
-### Step 3. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-If missing, install manually:
-```bash
-pip install django djangorestframework channels channels-redis mysqlclient pandas
-```
-
-### Step 4. Configure MySQL Database
-Update settings.py
-```bash
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'cs_messaging',
-        'USER': 'The user',
-        'PASSWORD': 'yourpassword',
-        'HOST': '127.0.0.1',
-        'PORT': '3306',
-        'OPTIONS': {"init_command": "SET sql_mode='STRICT_TRANS_TABLES'"},
-    }
-}
-
-DEBUG = True
-```
-Then run migrations:
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
-
-### Step 5. Start Redis (WebSocket Backend)
-### Option 1: Docker
-```bash
-docker run -d -p 6379:6379 redis
-```
-### Option 2: Local Installation
-Install Redis locally and run:
-```bash
-redis-server
-```
-
-### Step 6. Import Messages agents and canned responses
-```bash
-python manage.py import_messages
-python manage.py seed_data
-```
-Note:
-The import_messages command loads customer messages from the CSV file in the /data folder.
-The seed_data command creates sample agents and canned messages so you can test assignment, replies, and the message workflow.
-
-### Step 7. Run Server
-For WebSocket Support
-```bash
-daphne -p 8000 cs_messaging.asgi:application
-```
-
-For REST API Testing Only
-```bash
-python manage.py runserver
-```
-For Render or deployment:
-Set your Render Start Command as:
-```bash
-python manage.py migrate && python manage.py import_messages && python manage.
-```
-This ensures your production database is also preloaded with demo data for testing.
-
-## API Endpoints
-```bash
-GET     /api/messages/		        List all messages (supports filtering by ?status= and search query)
-POST    /api/messages/		        Create new customer message
-POST    /api/messages/<id>/claim	Agent claims message for handling
-POST    /api/messages/<id>/reply	Agent sends a custom reply (closes message)
-POST    /api/messages/<id>/canned	Agent replies using canned message
-GET     /api/canned/		        List all canned messages
-POST    /api/canned/		        create new canned message
-```
-## Example Workflows
-### 1. customer Sends a Message
-```bash
-curl -X POST http://127.0.0.1:8000/api/messages/ \
-     -H "Content-Type: application/json" \
-     -d '{"user_id": "U001", "body": "When will my loan be disbursed?"}'
-```
-
-→ Stored in DB as unassigned. Urgency score increases because of “loan” keyword.
-
-### 2. Agent Claims Message
-```bash
-curl -X POST http://127.0.0.1:8000/api/messages/12/claim \
-     -H "Content-Type: application/json" \
-     -d '{"agent_id": 1}'
-```
-
-→ System assigns the message to agent 1.
-→ If another agent tries, they’ll get:
-```bash
-{"status": "already_claimed", "by": "Agent 1"}
-```
-### 3. Agent Replies
-```bash
-curl -X POST http://127.0.0.1:8000/api/messages/12/reply \
-     -H "Content-Type: application/json" \
-     -d '{"agent_id": 1, "text": "Your loan will be processed in 24 hours."}'
-```
-
-→ Message marked as “closed” and broadcasted to all agents via WebSocket.
-
-### 4. Agent Uses a Canned Message
-```bash
-curl -X POST http://127.0.0.1:8000/api/messages/12/canned \
-     -H "Content-Type: application/json" \
-     -d '{"agent_id": 1, "canned_id": 2}'
-```
-
-→ Canned message inserted as reply and status changed to closed.
-
-## WebSocket Notifications
-
-Agents connected to:
-```bash
-ws://127.0.0.1:8000/ws/agents/
-```
-
-will receive updates like:
-```bash
-{"type": "message_update", "message_id": 12, "status": "closed", "assigned_to": 1}
-```
-
-or when new messages arrive:
-```bash
-{"type": "message_new", "message_id": 18, "status": "unassigned", "body": "Need help with my card"}
-```
-## Concurrency Test
-Make sure before running it:
-Your Django server is already running 
-```bash
-python manage.py runserver
-```
-To test message-claim race conditions:
-```bash
-python run_claim_test.py
-```
-
-Seven agents will attempt to claim the same message — only one will succeed, proving the locking system works.
-
-## Deployment Notes
-**Live Demo** : [customer-service-lt53.onrender.com](customer-service-lt53.onrender.com) 
-
-Note: there's no home page so hitting the base endpoint can lead to page not found error. so when testing, test with the available endpoint
-
-1.Ensure Redis and MySQL services are running.
-
-2.For Render or cloud deployment, store secrets in environment variables.
-
-3. Run import_messages after deployment to preload sample data if needed.
+1. **The Customer View:** Open your browser to `http://localhost:5173/customer`. You'll see the standalone Customer Portal. Fill out a ticket, but don't click submit yet!
+2. **The Agent Dashboard:** Open a *second* browser window side-by-side at `http://localhost:5173/`. Click an Agent Avatar to log into their dashboard. 
+3. **Witness WebSockets:** Go back to the Customer window and click **Submit**. Watch as the ticket instantly pops into the Agent's Inbox in the other window in real-time.
+4. **The Agent Workflow:** In the Agent window, click the new ticket. Notice that the chat interface is disabled until you formally declare ownership using the **Claim Ticket** button. 
+5. **Threaded Replies:** Once claimed, type out a custom response or hit one of the "Canned Responses" (featuring a sleek preview modal!) and submit it to see the ticket thread build organically.

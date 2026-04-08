@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ["customer-service-lt53.onrender.com",  # my Render URL
     "127.0.0.1",
@@ -37,6 +37,7 @@ ALLOWED_HOSTS = ["customer-service-lt53.onrender.com",  # my Render URL
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -44,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'corsheaders',
     'messaging',
     'channels',
     'drf_yasg'
@@ -51,6 +53,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -77,6 +80,14 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'cs_messaging.wsgi.application'
+
+# Celery Configuration Options
+CELERY_TIMEZONE = "UTC"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_BROKER_URL = "redis://127.0.0.1:6379/1"
+CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/1"
+
 ASGI_APPLICATION = 'cs_messaging.asgi.application'
 
 CHANNEL_LAYERS = {
@@ -129,6 +140,9 @@ USE_I18N = True
 
 USE_TZ = True
 
+CORS_ALLOW_ALL_ORIGINS = True  # For dev purposes, since frontend uses Vite randomly assigned ports sometimes
+
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
@@ -144,5 +158,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny"
-    ]
+    ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "EXCEPTION_HANDLER": "messaging.utils.custom_exception_handler",
 }

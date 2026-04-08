@@ -1,6 +1,10 @@
 import re
 from datetime import datetime, timezone as dt_timezone
 from django.utils import timezone
+from rest_framework.views import exception_handler
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response as DRFResponse
+
 
 # Keyword weights for priority scoring
 URGENT_KEYWORDS = {
@@ -54,3 +58,36 @@ def calculate_priority(body: str, created_at: datetime, status: str) -> int:
         if age_hours >= 48:
             score += 5  # very overdue (ignored too long)
     return score
+
+def custom_exception_handler(exc, context):
+    """
+    Unified error response format.
+    """
+    response = exception_handler(exc, context)
+    
+    if response is not None:
+        message = "Validation error" if isinstance(exc, ValidationError) else getattr(exc, 'detail', str(exc))
+        # Handle string vs dictionary detail
+        if isinstance(message, dict) and 'detail' in message:
+            message = message['detail']
+            
+        custom_data = {
+            'success': False,
+            'message': str(message),
+            'errors': response.data if isinstance(exc, ValidationError) or isinstance(response.data, dict) else None,
+            'data': None
+        }
+        response.data = custom_data
+        
+    return response
+
+def generic_response(data=None, message="Success", success=True, status_code=200):
+    """
+    Unified generic response format for both success and manual errors.
+    """
+    return DRFResponse({
+        "success": success,
+        "message": message,
+        "data": data,
+        "errors": None if success else data
+    }, status=status_code)
