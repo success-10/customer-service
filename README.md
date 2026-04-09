@@ -17,14 +17,14 @@ This project tackles the **"Concurrency Problem"** in customer support: *What ha
 
 Instead of relying on basic models, this backend engine uses raw database-level locking (`select_for_update(skip_locked=True)`) to guarantee atomic ticket claims. It pairs this with a persistent **WebSocket (ASGI)** connection layer to instantly broadcast ticket states across all connected agent dashboards, and a robust **Threaded Reply Engine** for infinite conversational ping-pong between agents and customers.
 
-### 🔐 Where's the Authentication?
+###  Where's the Authentication?
 If you're wondering why you don't need a username and password to log in, **that is highly intentional.** 
 
 This project was built as a portfolio showcase to demonstrate complex **Real-Time Data Flow, Concurrency, and State Management**, rather than basic JWT/OAuth flows. To eliminate friction for reviewers and recruiters, the application operates on an "Agent Persona" basis. You simply click an Agent card to immediately adopt their session state and drop directly into the action.
 
 ---
 
-## 🧠 What's Going On Behind The Scenes?
+##  What's Going On Behind The Scenes?
 
 - **Real-Time WebSockets (Django Channels & Daphne):** The moment a customer submits a ticket via the Customer Portal, a WebSocket broadcast fires via `AgentConsumer`. The React frontend mathematically evaluates the ticket priority and instantly injects it into every active agent's inbox—no page refreshes required.
 - **Race-Condition Proof Ticket Claiming:** When an agent clicks "Claim", the backend initiates a transactional block utilizing PostgreSQL/SQLite Row-Level Locks. If another agent beats them to the Database by 1ms, they get a graceful "Already Claimed" rejection, preventing assignment collisions.
@@ -33,7 +33,7 @@ This project was built as a portfolio showcase to demonstrate complex **Real-Tim
 
 ---
 
-## 🛠 Technology Stack
+##  Technology Stack
 
 ### Backend
 * **Python / Django 5.x:** The core MVC brain.
@@ -49,7 +49,7 @@ This project was built as a portfolio showcase to demonstrate complex **Real-Tim
 
 ---
 
-## 🚀 Step-by-Step Setup Guide
+##  Step-by-Step Setup Guide
 
 You can run this entire high-performance engine locally on your machine in just a few minutes.
 
