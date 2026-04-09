@@ -9,7 +9,7 @@
 
 ---
 
-## 🎯 The 60-Second Pitch
+## The project
 
 Why look at another CRUD app? **Agent Connect Hub** isn't just about reading and writing tickets. It's a demonstration of solving complex, real-time backend problems. 
 
